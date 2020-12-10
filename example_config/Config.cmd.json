@@ -1,0 +1,50 @@
+{
+	"align":{
+		"tmpdir":"/fs1/sima/nipt/tmp",
+		"ntasks":16,
+		"mem":"64G"
+
+	},
+	"amycne":{
+		"minq":10
+
+	},
+	"wisecondorx":{
+		"reftest":"/fs1/sima/nipt/results.test.npz",
+		"testbinsize":500000,
+		"refpreface":"/fs1/sima/nipt/results.test.npz",
+		"prefacebinsize":100000,
+		"blacklist":"/fs1/sima/nipt/data/fixtures/blacklist.bed",
+		"zscore": 1.5
+	},
+	"tiddit":{
+		"binsize":50000
+	},
+	"preface":{
+		"model_dir":"/fs1/sima/nipt/data/fixtures/PREFACE_AMYCNE_2500_50kbp_10mapq_100kbp_wcx.txt.model.olm",
+		"modelsettings":"--olm"
+
+	},
+	"picard":{
+		"javasettings":"-Xms4G -Xmx4G"
+	},
+	"reference":"/fs1/sima/nipt/data/ref/human_g1k_v37_decoy.fasta",
+	"singularity":"/fs1/sima/nipt/container/FluFFyPipe.sif",
+	"slurm": {
+	        "account":"user",
+		"partition":"normal",
+		"time":"5:00:00",
+		"ntasks":1,
+		"mem":"8G"
+
+
+	},
+	"summary":{
+		"mincnv":10000000,
+		"zscore":5
+	}
+}
+
+
+
+
