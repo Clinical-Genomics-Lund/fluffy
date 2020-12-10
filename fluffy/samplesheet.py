@@ -19,7 +19,7 @@ def get_separator(line: str) -> str:
 def get_sample_col(line_content: list) -> int:
     """Get the column number that holds the sample name"""
     for column, info in enumerate(line_content):
-        if info.lower() == "sampleid":
+        if info.lower() == "sample_id":
             return column
     return None
 
@@ -34,41 +34,45 @@ def read_samplesheet(samplesheet: Iterator[str], project_dir: Path) -> Iterator[
     samples = set()
     sample_col = 0
 
-    first=True
+    header_line=False
     for line_nr, line in enumerate(samplesheet):
-
-        if line.startswith("[Data]") and first:
+    
+        if not line.startswith("Sample_ID") and header_line == False:
             continue
-
-        if first:
+        
+        if  line.startswith("Sample_ID"):
+            
+            header_line=True
             separator = get_separator(line)
             LOG.debug("Use separator %s", separator)
             header = line.rstrip().split(separator)
             sample_col = get_sample_col(header)
-            first=False
             continue
+        
+        if 'NIPT' in line: 
+            content = line.rstrip().split(separator)
+            sample_name = content[sample_col]
+        
+            if sample_name in samples:
+                continue
 
-        content = line.rstrip().split(separator)
-        sample_name = content[sample_col]
+            samples.add(sample_name)
+        
+            single_end = True
+            LOG.debug("Check if files are single end or not")
+            for file_name in project_dir.glob("*{}*.fastq.gz".format(sample_name)):
+                if "_R2" in str(file_name):
+                    single_end = False
+                    break
 
-        if sample_name in samples:
-            continue
+            fastq = [
+                "<( zcat {}/{}*_R1*fastq.gz )".format(project_dir, sample_name),
+                "<( zcat {}/{}*_R2*fastq.gz )".format(project_dir, sample_name),
+            ]
 
-        samples.add(sample_name)
+        
+            if single_end:
+                LOG.info("Single end files!")
+                fastq = ["<( zcat {}/{}*_R1*fastq.gz )".format(project_dir, sample_name)]
+            yield {"fastq": fastq, "single_end": single_end, "sample_id": sample_name}
 
-        single_end = True
-        LOG.debug("Check if files are single end or not")
-        for file_name in project_dir.glob(f"*{sample_name}*/*.fastq.gz"):
-            if "_R2" in str(file_name):
-                single_end = False
-                break
-
-        fastq = [
-            "<( zcat {}/*{}*/*_R1*fastq.gz )".format(project_dir, sample_name),
-            "<( zcat {}/*{}*/*_R2*fastq.gz )".format(project_dir, sample_name),
-        ]
-        if single_end:
-            LOG.info("Single end files!")
-            fastq = ["<( zcat {}/*{}*/*_R1*fastq.gz )".format(project_dir, sample_name)]
-
-        yield {"fastq": fastq, "single_end": single_end, "sample_id": sample_name}

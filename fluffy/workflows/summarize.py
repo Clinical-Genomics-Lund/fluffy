@@ -15,7 +15,7 @@ def get_summarize_cmd(
     """Return a string with the command to summarize a run"""
     outfile = out_dir / "summary.csv"
     summary_cmd = (
-        f"singularity exec {singularity_exe} python /bin/FluFFyPipe/scripts/generate_csv.py "
+        f"singularity exec {singularity_exe} python /fs1/sima/nipt/fluffy/scripts/generate_csv.py "
         f"--folder {str(out_dir)} --samplesheet {sample_sheet} --Zscore {zscore} --minCNV {mincnv} "
         f"> {str(outfile)}"
     )
