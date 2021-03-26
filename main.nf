@@ -5,67 +5,86 @@ OUTDIR = params.outdir+'/'+params.subdir
 Channel
     .fromPath(params.csv)
     .splitCsv(header:true)
-    .map{ row-> tuple(row.Sample_ID, file(row.read1))}
-    .into {fastqs_bwa; fastqs_qc; cleanup}
+    .map{ row-> tuple(row.id, file(row.read1),file(row.read2))}
+    .into {fastqs_bwa;fastqs_qc;cleanup}
+    
 
 process fastqc{
+
     tag "${sampl_id}"
     publishDir "${OUTDIR}/QC", mode: 'copy'
 
     input:
-        set val(sampl_id), file(read1) from fastqs_qc
+        set val(sampl_id), file(read1), file(read2) from fastqs_qc
     
     output:
         file '*' into fatqc_out
-    script:
-    """
-    fastqc -d ${params.tmp_dir} -o . ${read1}
-    """
+     
+     script:
+	
+	fastqs= params.singleEnd ? "${read1}" : "${read1} ${read2}"
+     	"""
+     	fastqc -d ${params.tmp_dir} -o . ${fastqs}
+   	"""
 }
+
 
 process bwa{
+   
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     cpus 16
-
+     
+    
     input:
-        set val(sampl_id), file(read1) from fastqs_bwa
+        set val(sampl_id), file(read1),file(read2) from fastqs_bwa
 
     output:
-        set val(sampl_id), file(read1), file("${sampl_id}.sai") into bwa_sai
+	set val(sampl_id), file("${sampl_id}.sam") into bwa_saisam
 
     script:
-    """
-    bwa aln -n 0 -k 0 ${params.genome_fasta} ${read1} > ${sampl_id}.sai
-    """
-}
+	
+	if (params.singleEnd)
+		"""
+		bwa aln -n 0 -k 0 ${params.genome_fasta} ${read1} > ${sampl_id}.sai
+		bwa samse -n -1 ${params.genome_fasta} ${sampl_id}.sai ${read1} >  ${sampl_id}.sam
+    		""" 
+	
+	else if(params.pairedEnd)
+		"""
+	     	bwa aln -n 0 -k 0 ${params.genome_fasta} ${read1} > ${sampl_id}.R1.sai
+	     	bwa aln -n 0 -k 0 ${params.genome_fasta} ${read2} > ${sampl_id}.R2.sai
+	     	bwa sampe -n -1 ${params.genome_fasta} ${sampl_id}.R1.sai ${sampl_id}.R2.sai ${read1} ${read2} > ${sampl_id}.sam	       
+	     	"""
+	}
+
 
 process bamsormadup{
+    //convert sam file to bam and sort them based on the coordinate
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     cpus 16
-
+    
     input:
-        set val(sampl_id), file(read1) , file(sai) from bwa_sai
+        set val(sampl_id), file(aln_sam) from bwa_saisam
         
     output:
         set val(sampl_id), file("${sampl_id}.bam"), file("${sampl_id}.bam.bai") into bambai, bam_picard1, bam_picard2, bam_picard3, bam_tiddit
 
     script:
     """
-    bwa samse -n -1 ${params.genome_fasta} ${sai} ${read1} \\
-    | \\
     bamsormadup \\
         inputformat=sam \\
         threads=${task.cpus} \\
         SO=coordinate \\
         outputformat=bam \\
         tmpfile=${params.tmp_dir}/${sampl_id} \\
-        indexfilename=${sampl_id}.bam.bai > ${sampl_id}.bam
+        indexfilename=${sampl_id}.bam.bai < ${aln_sam} > ${sampl_id}.bam
     """  
     }
 
 process bam_to_npz{
+    //Convert bam files to npz format required by wiscondorx
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     
@@ -82,6 +101,8 @@ process bam_to_npz{
     """
 }
 
+// ************* Picard Analysis ********* //
+
 process  CollectGcBiasMetrics{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
@@ -89,20 +110,24 @@ process  CollectGcBiasMetrics{
 
     input:
       set val(sampl_id), file(bam), file(bai) from bam_picard1  
+    
     output:
         set val(sampl_id), file("${sampl_id}.gc_bias_metrics.txt"), file("${sampl_id}.gc.summary.tab") into  picard_gc_info
         file("${sampl_id}.gc_bias_metrics.pdf")
+    
     script:
     """
     picard CollectGcBiasMetrics \\
         I=${bam} \\
         O=${sampl_id}.gc_bias_metrics.txt \\
         CHART=${sampl_id}.gc_bias_metrics.pdf \\
-        S=${sampl_id}.gc.summary.tab R=${params.genome_fasta} \\
+        S=${sampl_id}.gc.summary.tab \\
+	R=${params.genome_fasta} \\
         VALIDATION_STRINGENCY=LENIENT -Xms4G -Xmx4G
     """
 }
-/*
+
+
 process CollectInsertSizeMetrics{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/picard", mode: 'copy'
@@ -128,7 +153,8 @@ process CollectInsertSizeMetrics{
     //mv  insert_size_metrics.txt ${sampl_id}.insert_size_metrics.txt
     //mv insert_size_histogram.pdf ${sampl_id}.insert_size_histogram.pdf
 }
-*/
+
+
 process EstimateLibraryComplexity{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
@@ -148,7 +174,9 @@ process EstimateLibraryComplexity{
     """    
 }
 
+// *************** Conerage profiling ****************/
 process tiddit{
+    //coverage profiling 
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     memory 16.GB
@@ -161,11 +189,12 @@ process tiddit{
     
     script:
     """
-    python /bin/TIDDIT.py --cov --bam ${bam}  -z 50000 -o ${sampl_id}.tiddit
+    python /bin/TIDDIT.py --cov --bam ${bam} -z 50000 -o ${sampl_id}.tiddit
     """    
 }
 
 process generateGeneomeGCtab{
+    //Genotype coverage profiling
     //publishDir "${OUTDIR}/${sampl_id}", mode: 'copy' 
     memory 16.GB 
     when:
@@ -182,6 +211,7 @@ process generateGeneomeGCtab{
 }
 
 process AMYCNE{
+    // copy number estimation and FFY estimation
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     memory 16.GB
@@ -198,8 +228,9 @@ process AMYCNE{
     python /bin/AMYCNE/AMYCNE.py --ff --coverage ${tiddit_tab} --gc ${gc_tab} --Q 10 > ${sampl_id}.tiddit.AMYCNE.tab
     """
 }
-
+//******************** wisecondorX prediction ***********/
 process WCXpredict{
+    //wisecondorx prediction 
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
      memory 16.GB
@@ -213,7 +244,7 @@ process WCXpredict{
     """
     WisecondorX \\
         --loglevel info predict ${bam_npz} \\
-        ${params.WCX_reftest} \\
+        ${params.ref500kbp} \\
         ${sampl_id}.WCXpredict \\
         --bed --blacklist ${params.blacklist} \\
         --zscore ${params.zscore}
@@ -221,6 +252,7 @@ process WCXpredict{
 }
 
 process WCX_preface{
+    //wisecondorx prediction based on the Preface ref file(different bin size)
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
      memory 16.GB
@@ -233,9 +265,9 @@ process WCX_preface{
     
     script:
     """
-    WisecondorX --loglevel info predict \\
-        ${bam_npz} \\
-        ${params.refpreface} \\
+    WisecondorX \\
+    	--loglevel info predict ${bam_npz} \\
+        ${params.ref100kbp} \\
         ${sampl_id}.WCXpredict.preface \\
         --bed --blacklist ${params.blacklist} \\
         --zscore ${params.zscore}
@@ -243,6 +275,7 @@ process WCX_preface{
 }
 
 process WCX_gender{
+    //Wisecondorx  gender prediction
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     memory 16.GB
@@ -254,11 +287,12 @@ process WCX_gender{
     
     script:
     """
-    WisecondorX gender ${bam_npz} ${params.WCX_reftest} > ${sampl_id}.wcx.npz.gender.txt
+    WisecondorX gender ${bam_npz} ${params.ref500kbp} > ${sampl_id}.wcx.npz.gender.txt
     """
 }
 
 process preface{
+    //General fetal fraction prediction and ff predicrion based on chX
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${sampl_id}", mode: 'copy'
     
@@ -275,10 +309,11 @@ process preface{
         --model ${params.model} > ${sampl_id}_bins.bed.PREFACE.txt
     """
 }
-
+/**************** batch summary ***********/       
 process multiqc{
     publishDir "${OUTDIR}", mode: 'copy'
-
+    input:
+     file ("${OUTDIR}/QC/*") from fatqc_out.collect()
     output:
         file('multiqc_report.html')
         file('*')
@@ -292,9 +327,15 @@ process multiqc{
     """
 }
 
-process summarizebatch{
+process summary{
     //to do: add  run folder to summary file name 
     publishDir "${OUTDIR}", mode: 'copy'
+    //input:
+	//file(preface_out) from preface_out.collect()
+	//file(sex) from wcx_gender.collect()
+	//file(wcx_preface) from wcx_predict_preface.collect()
+	//file(amycne)  from amycne_tab.collect()
+	//file(wcx_predict) from wcx_predict.collect()
 
     output:
         file('batch_summary.csv')
@@ -305,35 +346,10 @@ process summarizebatch{
 	//idx= parts.findIndexOf {it ==~ /......_......_...._........../}
 	//rundir= parts[0..idx].join("/")
     """
-    python /fs1/sima/nipt/fluffy/scripts/generate_csv.py \\
+    python3 /fs1/sima/nipt/fluffy/scripts/generate_csv.py \\
         --folder ${OUTDIR} \\
         --samplesheet ${params.csv} \\
         --Zscore 5 \\
         --minCNV 10000000 > batch_summary.csv
     """
-}
-
-process cleanup{
-    tag "${sampl_id}"
-
-    input:
-        set val(sampl_id), file(read1) from cleanup
-    
-    output:
-        file('*')
-    
-    script:
-    /*
-    export LC_ALL=C.UTF-8                                                                                                       
-        export LANG=C.UTF-8 
-        multiqc ${OUTDIR}/${sampl_id} --outdir ${OUTDIR}/${sampl_id}
-    */
-    """
-        cp -r ${OUTDIR}/${sampl_id} ${OUTDIR}/${sampl_id}.fluffy-0.4.0
-        rm -f ${sampl_id}.fluffy-0.4.0/*.sai ${OUTDIR}/${sampl_id}.fluffy-0.4.0/*.bam 
-        zip -r ${OUTDIR}/${sampl_id}.fluffy-0.4.0.zip ${OUTDIR}/${sampl_id}.fluffy-0.4.0
-        rm -rf ${OUTDIR}/${sampl_id}.fluffy-0.4.0
-        
-    """
-    
 }
