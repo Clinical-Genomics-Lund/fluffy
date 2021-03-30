@@ -30,7 +30,7 @@ for r, d, f in os.walk(args.folder):
          files_in_folder.append(os.path.join(r, file))
 
 output_header = [
-    "Sample_ID",
+    "id",
     "SampleType",
     "SequencingDate",
     "Flowcell",
@@ -123,7 +123,7 @@ samples = {}
 sample_out = {
     "Bin2BinVariance": "",
     "UnfilteredCNVcalls": 0,
-    "Sample_ID": "",
+    "id": "",
     "SequencingDate":"",
     "DuplicationRate": 0,
     "SampleType": "",
@@ -210,10 +210,12 @@ for line in open(args.samplesheet):
         line=line.replace("\t"," ")
         line=line.replace(";"," ")
 
-    if not line.startswith("Sample_ID") and header_line == False:
+    #if not line.startswith("Sample_ID") and header_line == False:
+    if "id" not in line and header_line == False:
         continue
 
-    if line.startswith("Sample_ID"):
+    #if line.startswith("Sample_ID"):
+    if "id" in line: 
         i=0
         for entry in line.strip("\n").split(" "):
             samplesheet_info.append(entry)
@@ -222,13 +224,14 @@ for line in open(args.samplesheet):
         header_line = True
         #first=False
         continue
-    if 'NIPT' in line:
+    if header_line:
         i=0
         content=line.strip("\n").split(" ")
-        sample=content[samplesheet_dict["Sample_ID"]]
+        sample=content[samplesheet_dict["id"]]
         samples[ sample ]=copy.deepcopy(sample_out)
+        
     
-
+        
         for entry in content:
             if samplesheet_info[i] in sample_out:
                 samples[sample][samplesheet_info[i]] = entry
