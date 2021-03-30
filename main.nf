@@ -330,12 +330,12 @@ process multiqc{
 process summary{
     //to do: add  run folder to summary file name 
     publishDir "${OUTDIR}", mode: 'copy'
-    //input:
-	//file(preface_out) from preface_out.collect()
+    input:
+	file(preface_out) from preface_out.collect()
 	//file(sex) from wcx_gender.collect()
-	//file(wcx_preface) from wcx_predict_preface.collect()
-	//file(amycne)  from amycne_tab.collect()
-	//file(wcx_predict) from wcx_predict.collect()
+	file(wcx_preface) from wcx_predict_preface.collect()
+	file(amycne)  from amycne_tab.collect()
+	file(wcx_predict) from wcx_predict.collect()
 
     output:
         file('batch_summary.csv')
@@ -346,7 +346,7 @@ process summary{
 	//idx= parts.findIndexOf {it ==~ /......_......_...._........../}
 	//rundir= parts[0..idx].join("/")
     """
-    python3 /fs1/sima/nipt/fluffy/scripts/generate_csv.py \\
+    python3 ${baseDir}/scripts/generate_csv.py \\
         --folder ${OUTDIR} \\
         --samplesheet ${params.csv} \\
         --Zscore 5 \\
