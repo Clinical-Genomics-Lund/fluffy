@@ -68,7 +68,8 @@ process bamsormadup{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
     cpus 16
-    memory '30GB'
+    memory '20GB'
+    time '20m'
     
     input:
         set val(sampl_id), file(aln_sam), run from bwa_saisam
@@ -92,7 +93,9 @@ process bam_to_npz{
     //Convert bam files to npz format required by wiscondorx
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-    memory '30GB'
+    memory '3GB'
+    time '20m'
+    cpus 2
     
     input:
         set val(sampl_id), file(bam), file(bai), run from bambai
@@ -112,6 +115,9 @@ process  CollectGcBiasMetrics{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
     memory 16.GB
+    time '20m'
+    cpus 2
+
 
     input:
       set val(sampl_id), file(bam), file(bai), run from bam_picard1  
@@ -137,6 +143,8 @@ process CollectInsertSizeMetrics{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/picard", mode: 'copy'
     memory 16.GB
+    time '20m'
+    cpus 2
 
     input:
         set val(sampl_id), file(bam), file(bai), run from bam_picard2
@@ -164,6 +172,8 @@ process EstimateLibraryComplexity{
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
     memory 16.GB
+    time '20m'
+    cpus 2
 
     input:
         set val(sampl_id), file(bam), file(bai), run from bam_picard3
@@ -184,7 +194,10 @@ process tiddit{
     //coverage profiling 
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-    memory 16.GB
+    memory 3.GB
+    cpus 1
+    time '10m'
+
     
     input:
         set val(sampl_id), file(bam), file(bai), run from bam_tiddit
@@ -202,11 +215,17 @@ process generateGeneomeGCtab{
     //Genotype coverage profiling
     //publishDir "${OUTDIR}/${sampl_id}", mode: 'copy' 
     memory 16.GB 
+    time '30m'
+    cpus 1
+
     when:
         params.genome_gc
+
     output:
         file('genome.gc.tab') into genomeGCtab
+
     script:
+
     """
     python /bin/AMYCNE/Generate_GC_tab.py \\
     --fa ${params.genome_fasta} \\
@@ -219,18 +238,20 @@ process AMYCNE{
     // copy number estimation and FFY estimation
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-    memory 16.GB
+    memory 1.GB
+    time '5m'
+    cpus 2
     
     input:
         set val(sampl_id), file(tiddit_tab), run from tiddit_cov
-        file(gc_tab) from genomeGCtab
+        //file(gc_tab) from genomeGCtab
     
     output:
         set val(sampl_id), file("${sampl_id}.tiddit.AMYCNE.tab") into amycne_tab
     
     script:
     """
-    python /bin/AMYCNE/AMYCNE.py --ff --coverage ${tiddit_tab} --gc ${gc_tab} --Q 10 > ${sampl_id}.tiddit.AMYCNE.tab
+    python /bin/AMYCNE/AMYCNE.py --ff --coverage ${tiddit_tab} --gc $params.gctab --Q 10 > ${sampl_id}.tiddit.AMYCNE.tab
     """
 }
 //******************** wisecondorX prediction ***********/
@@ -238,7 +259,10 @@ process WCXpredict{
     //wisecondorx prediction 
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-     memory 16.GB
+    memory 1.GB
+    time '5m'
+    cpus 2
+
     input:
         set val(sampl_id), file(bam_npz), run from bam_npz_wcx
     
@@ -260,7 +284,9 @@ process WCX_preface{
     //wisecondorx prediction based on the Preface ref file(different bin size)
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-    memory 16.GB
+    memory 3.GB
+    cpus 2
+    time '5m'
 
     input:
         set val(sampl_id), file(bam_npz), run from bam_npz_preface
@@ -284,7 +310,10 @@ process WCX_gender{
     //Wisecondorx  gender prediction
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
-    memory 16.GB
+    memory 3.GB
+    cpus 2
+    time '5m'
+    
     input:
         set val(sampl_id), file(bam_npz), run from bam_npz_wcx_gender
     
@@ -301,6 +330,9 @@ process preface{
     //General fetal fraction prediction and ff predicrion based on chX
     tag "${sampl_id}"
     publishDir "${OUTDIR}/${run}/${sampl_id}", mode: 'copy'
+    memory '3GB'
+    cpus 2
+    time '5m'
     
     input:
         set val(sampl_id), file(bins_bed), run from preface_bins_bed
@@ -318,6 +350,9 @@ process preface{
 /**************** batch summary ***********/       
 process multiqc{
     publishDir "${OUTDIR}/${run}", mode: 'copy'
+    memory '10GB'
+    cpus 1
+    time '20m'
     
     input:
         set run, file(qcfiles) from fatqc_out.groupTuple()
@@ -339,7 +374,10 @@ process multiqc{
 process summary{
     //to do: add  run folder to summary file name 
     publishDir "${OUTDIR}/${run}/summary", mode: 'copy'
-    container = '/fs1/resources/containers/wgs_2021-03-16.sif'
+    container = '/fs1/resources/containers/wgs_2021-03-16.sif'  // temporary, need numpy not available in nipt-container as of 2021-07-12
+    cpus 2
+    time '30m'
+    memory '3GB'
 
     input:
         file(preface_out) from preface_out.collect()
